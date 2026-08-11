@@ -1,0 +1,22 @@
+# gwx per-account policy — EXAMPLE / TEMPLATE (redacted).
+# Copy to your deployment (kept OUT of git) and fill in real accounts.
+# The governance layer is enforced two ways: by rule here AND by OAuth scope,
+# so a rule bug can't grant a capability the token physically lacks.
+accounts:
+  personal:                       # e.g. a personal Gmail
+    email: you@example.com
+    scopes: [gmail.readonly, gmail.compose, drive.readonly]
+    review_required: false        # personal identity: review-after-draft optional
+    allow_send: false             # always draft-only; send needs confirm (see send_policy)
+  work:                           # e.g. a company Google Workspace identity
+    email: you@company.example
+    scopes: [gmail.readonly, gmail.compose, drive.readonly]
+    review_required: true         # 🔴 work identity: draft MUST be reviewed by a human before use
+    allow_send: false
+
+# Global send guardrail: no account ever sends autonomously. Requires explicit
+# human confirmation AND the (separately granted) gmail.send scope.
+send_policy:
+  autonomous_send: never
+  requires: human_confirm
+  note: "draft-only via readonly+compose scope. Sending needs gmail.send + per-action human confirmation."

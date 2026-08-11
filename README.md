@@ -19,7 +19,7 @@ gwx mail  --as work     draft --to a@b.com --subject "..." --body "..."   # crea
 ## Why gwx
 
 - **Switch accounts with one flag.** `--as <account>` — no logging in and out, no juggling browser profiles.
-- **Credentials live in one place.** Tokens sit on a single trusted host (your "anchor"); every other machine reaches it over a private [Tailscale](https://tailscale.com) network. Agents get the *capability*, never the raw token.
+- **Credentials live in one place.** Tokens sit on a single host you control; every other machine reaches it over your own private network. Agents get the *capability*, never the raw token.
 - **Governance built in.** Draft-only by default (the OAuth scope literally can't send). Work identities require you to review a draft before anything happens with it. Autonomous sending is never allowed.
 - **Cross-service, not just mail.** Open an email, follow the Google Doc / Sheet / Drive link inside, and read the content behind it — one flow.
 - **Works with any shell agent.** It's a plain CLI, so Claude / Codex / agy / your terminal all use it the same way. (An MCP interface is on the roadmap.)
@@ -31,11 +31,11 @@ gwx mail  --as work     draft --to a@b.com --subject "..." --body "..."   # crea
 1. **Multi-account routing** (`--as`)
 2. **Policy governance** (review gates, no-send, per-identity rules)
 3. **Cross-service link resolution** (mail → doc/sheet/drive content)
-4. **Scoped access over Tailscale** (token stays on the anchor; clients are thin)
+4. **Scoped, server-side access** (the token stays server-side; clients are thin)
 
 ## Install
 
-> **Status: prototype.** The commands below describe the **target install UX**. gwx is currently a thin CLI dogfooded against a self-hosted anchor — see [`docs/SPEC.md`](docs/SPEC.md). The one-liner and packages land with the first tagged release.
+> **Status: prototype.** The commands below describe the **target install UX**. gwx is currently a thin CLI dogfooded against a self-hosted backend — see [`docs/SPEC.md`](docs/SPEC.md). The one-liner and packages land with the first tagged release.
 
 ```sh
 # Quick install (target UX — auto-detects your platform)
@@ -63,8 +63,8 @@ Windows (`x86_64-pc-windows-msvc`, with an auto-generated `install.ps1`) is a on
 
 ## Status
 
-Early prototype, dogfooding in progress. Private while it stabilizes; the core is intended to become open source, with the enterprise/governance layer as the commercial edge. Part of **LeapCore**.
+Early prototype, dogfooding in progress. Private while it stabilizes; the core is intended to become open source. Part of **LeapCore**.
 
 ## License
 
-TBD (core → open source).
+[Apache-2.0](LICENSE) — the same license as the `gws` engine it builds on. Includes an explicit patent grant.

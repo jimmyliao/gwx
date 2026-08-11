@@ -31,11 +31,13 @@ One person, many Google identities (personal Gmail, work Workspace, side project
                               └────────────────────┘
 ```
 
-- **Anchor**: one always-on host holds every account's OAuth credential file (`~/gwx-creds/<account>.json`). Tokens never leave it.
-- **Transport**: a private [Tailscale](https://tailscale.com) (WireGuard) network. Only your own machines can reach the anchor.
-- **Client**: `gwx` on each machine is thin — it asks the anchor to perform a *capability*, and never holds a token or a shell on the anchor.
+> The topology below is one **reference deployment** — your own may differ. The only hard requirements are: credentials live on a host *you* control, and clients reach it over a private network, never holding the token themselves.
 
-> **Prototype note:** the current prototype reaches the anchor over `ssh` for speed of iteration. The product target is a **scoped service** on the anchor (like the read-only WebDAV service already used for Drive) so a client gets exactly one capability and no shell.
+- **Credential host**: one always-on host you control holds each account's OAuth credential file. Tokens never leave it.
+- **Transport**: your own private network — e.g. a WireGuard mesh such as [Tailscale](https://tailscale.com). Only your machines can reach the host.
+- **Client**: `gwx` on each machine is thin — it asks the host to perform a *capability*, and never holds a token or a shell there.
+
+> **Prototype note:** the current prototype reaches the host over `ssh` for speed of iteration. The product target is a **scoped service** so a client gets exactly one capability and no shell.
 
 ## 4. Accounts & the `--as` model
 
@@ -56,7 +58,7 @@ Policy is per-identity and enforced two ways — by rule *and* by OAuth scope, s
 - **Work identities are review-gated.** Creating a draft on a work account (e.g. a `leap*` identity) raises a mandatory "🔴 review required" notice. The task is not complete until a human has looked at the draft.
 - **No autonomous send, ever.** Sending is `autonomous_send: never` — it requires an explicit human confirmation, on top of the extra scope.
 
-See [`policy.yaml`](../policy.yaml) for the schema. (In the public repo this ships as a redacted template; real account emails live only in the private deployment.)
+See [`policy.example.yaml`](../policy.example.yaml) for the schema — a redacted template. Real account emails live only in your private deployment (copy the example, fill it in, and keep it out of git).
 
 ## 6. Command surface
 

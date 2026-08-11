@@ -19,7 +19,7 @@ gwx mail  --as work     draft --to a@b.com --subject "..." --body "..."   # 只�
 ## 為什麼用 gwx
 
 - **切帳號只要一個旗標。** `--as <account>` —— 不用登入登出,不用在瀏覽器多重設定檔之間切換。
-- **憑證集中一處。** token 只放在一台受信任的主機(你的「anchor」);其他機器透過私有的 [Tailscale](https://tailscale.com) 網路連過去。agent 拿到的是*能力*,永遠拿不到原始 token。
+- **憑證集中一處。** token 只放在一台你掌控的主機;其他機器透過你自己的私有網路連過去。agent 拿到的是*能力*,永遠拿不到原始 token。
 - **治理內建。** 預設只能建草稿(OAuth scope 本身就寄不出去)。工作身分在建草稿後,一定要你先過目才算數。自主寄信永遠不允許。
 - **跨服務,不只是信。** 開一封信、跟著裡面的 Google Doc / Sheet / Drive 連結,直接讀到連結背後的內容 —— 一氣呵成。
 - **任何 shell agent 都能用。** 它就是個純 CLI,所以 Claude / Codex / agy / 你的終端機用法完全一致。(MCP 介面在 roadmap 上。)
@@ -31,11 +31,11 @@ gwx mail  --as work     draft --to a@b.com --subject "..." --body "..."   # 只�
 1. **多帳號路由**（`--as`）
 2. **政策治理**（review 關卡、禁止寄信、逐身分規則）
 3. **跨服務連結穿透**（信 → doc/sheet/drive 內容）
-4. **經 Tailscale 的 scoped 存取**（token 留在 anchor;client 很薄）
+4. **伺服器端的 scoped 存取**（token 留在伺服器端;client 很薄）
 
 ## 安裝
 
-> **狀態:雛形。** 下面的指令描述的是**目標安裝體驗**。gwx 目前是對自架 anchor dogfood 的薄 CLI —— 見 [`docs/SPEC.md`](docs/SPEC.md)。一行安裝與各套件管道會隨第一個 tagged release 上線。
+> **狀態:雛形。** 下面的指令描述的是**目標安裝體驗**。gwx 目前是對自架後端 dogfood 的薄 CLI —— 見 [`docs/SPEC.md`](docs/SPEC.md)。一行安裝與各套件管道會隨第一個 tagged release 上線。
 
 ```sh
 # 一行安裝（目標體驗 —— 自動偵測你的平台）
@@ -63,8 +63,8 @@ Windows(`x86_64-pc-windows-msvc`,附自動生成的 `install.ps1`)只是 target 
 
 ## 狀態
 
-早期雛形,dogfooding 進行中。穩定前先保持 Private;核心預計開源,企業/治理層作為商業化護城河。屬於 **LeapCore**。
+早期雛形,dogfooding 進行中。穩定前先保持 Private;核心預計開源。屬於 **LeapCore**。
 
 ## 授權
 
-待定(核心 → 開源)。
+[Apache-2.0](LICENSE) —— 與所 wrap 的 `gws` 引擎同授權,內含明確專利 grant。
