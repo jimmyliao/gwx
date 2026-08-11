@@ -1,5 +1,7 @@
 # gwx
 
+**English** | [繁體中文](README.zh-TW.md)
+
 **Multi-account, policy-governed Google Workspace access — built for AI agents (and the humans who supervise them).**
 
 You have many Google identities — personal Gmail, work Google Workspace, side projects. Your AI agents (Claude, Codex, and friends) need to read your mail and Drive to actually help — but you don't want tokens scattered across machines, and you *definitely* don't want an agent quietly emailing your boss.
@@ -49,7 +51,9 @@ Planned channels, once releases ship:
 | **Cargo** | `cargo install gwx` (or `cargo binstall gwx`) | Rust users; binstall skips compiling |
 | **Manual binary** | download from [Releases](https://github.com/jimmyliao/gwx/releases) | CI, air-gapped, custom |
 
-Release binaries will cover `{x86_64,aarch64}-{apple-darwin, unknown-linux-gnu, unknown-linux-musl}` (musl included so Alpine/Docker work) via [cargo-dist](https://github.com/axodotdev/cargo-dist) — the same pipeline `gws` and `uv` use, which also generates the install script and Homebrew formula.
+Release binaries cover `{x86_64,aarch64}-{apple-darwin, unknown-linux-gnu, unknown-linux-musl}` (musl included so Alpine/Docker work) via [cargo-dist](https://github.com/axodotdev/cargo-dist) — the same pipeline `gws` and `uv` use, which also generates the install script and Homebrew formula. The release workflow is in place and verified locally (`dist plan` / `dist build` produce all six targets, the installer, and the formula); the channels above go live on the first tagged release.
+
+Windows (`x86_64-pc-windows-msvc`, with an auto-generated `install.ps1`) is a one-line addition to the target list — deferred until there's a Windows host to test on.
 
 ## Safety model
 
