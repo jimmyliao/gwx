@@ -1,9 +1,9 @@
 //! gwx — 多帳號 × 有治理 × 跨服務的 Google Workspace 層 for AI agents。
 //! 引擎 = gws(wrap);gwx 加四層:--as 路由 / policy 治理 / 連結穿透 / scoped serve。
 //!
-//! Note: run_gws currently shells to `ssh anchor "... gws ..."`. The product target
-//! swaps that for an HTTP call to gwx-svc (see docs/SPEC.md) so clients hold no token
-//! and get no shell on the anchor.
+//! Note: run_gws currently shells to `ssh <host> "... gws ..."`. The product target
+//! swaps that for an HTTP call to the scoped service (see docs/SPEC.md) so clients hold
+//! no token and get no shell on the credential host.
 
 use clap::{Parser, Subcommand};
 use std::process::{exit, Command};
@@ -87,15 +87,16 @@ enum DocOp {
     Resolve,
 }
 
-fn anchor() -> String {
-    std::env::var("GWX_ANCHOR").unwrap_or_else(|_| "anchor".into())
+/// The credential host (a secret store). Set GWX_HOST to your ssh alias for it.
+fn host() -> String {
+    std::env::var("GWX_HOST").unwrap_or_else(|_| "gwx-host".into())
 }
 fn creds_dir() -> String {
     std::env::var("GWX_CREDS_DIR").unwrap_or_else(|_| "$HOME/gwx-creds".into())
 }
 
-/// 在 anchor 上以指定帳號 creds 跑 gws。
-/// TODO(productize):改成對 gwx-svc 的 HTTP 呼叫(見 svc/gwx_svc.py)。
+/// Run gws for a given account on the credential host.
+/// TODO(productize): swap this ssh call for an HTTP call to the scoped service (see docs/SPEC.md).
 fn run_gws(account: &str, args: &[&str]) -> i32 {
     let remote = format!(
         "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE={}/{}.json gws {}",
@@ -104,7 +105,7 @@ fn run_gws(account: &str, args: &[&str]) -> i32 {
         args.join(" ")
     );
     match Command::new("ssh")
-        .args(["-o", "BatchMode=yes", &anchor(), &remote])
+        .args(["-o", "BatchMode=yes", &host(), &remote])
         .status()
     {
         Ok(s) => s.code().unwrap_or(1),
@@ -211,7 +212,7 @@ fn main() {
                 creds_dir()
             );
             Command::new("ssh")
-                .args(["-o", "BatchMode=yes", &anchor(), &cmd])
+                .args(["-o", "BatchMode=yes", &host(), &cmd])
                 .status()
                 .map(|s| s.code().unwrap_or(1))
                 .unwrap_or(1)

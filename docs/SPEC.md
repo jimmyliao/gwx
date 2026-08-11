@@ -22,18 +22,18 @@ One person, many Google identities (personal Gmail, work Workspace, side project
 ## 3. Architecture
 
 ```
-  agent / terminal            trusted "anchor" host           Google
-  (any machine)               (holds all credentials)
-  ┌───────────┐   Tailscale   ┌────────────────────┐   OAuth   ┌─────────┐
+  agent / terminal            credential host                 Google
+  (any machine)               (a secret store)
+  ┌───────────┐  private net  ┌────────────────────┐   OAuth   ┌─────────┐
   │  gwx CLI  │ ────────────▶ │ scoped service     │ ────────▶ │ Google  │
-  │ (thin)    │  capability   │  → gws → per-acct   │  tokens   │Workspace│
-  └───────────┘   only        │    credential files │           └─────────┘
+  │ (thin)    │  capability   │  → gws → secret get │  tokens   │Workspace│
+  └───────────┘   only        │    per account      │           └─────────┘
                               └────────────────────┘
 ```
 
 > The topology below is one **reference deployment** — your own may differ. The only hard requirements are: credentials live on a host *you* control, and clients reach it over a private network, never holding the token themselves.
 
-- **Credential host**: one always-on host you control holds each account's OAuth credential file. Tokens never leave it.
+- **Credential host**: one always-on host you control acts as a **secret store** for every account's OAuth credentials. Tokens never leave it. The store sits behind a `secret get <account>` interface, so the backend is pluggable — access-controlled files today; a real secret manager (Vault / OpenBao) later — without changing the service.
 - **Transport**: your own private network — e.g. a WireGuard mesh such as [Tailscale](https://tailscale.com). Only your machines can reach the host.
 - **Client**: `gwx` on each machine is thin — it asks the host to perform a *capability*, and never holds a token or a shell there.
 
@@ -82,7 +82,8 @@ gwx accounts                          # list configured accounts
 
 ## 8. Roadmap
 
-- Replace the ssh-shim prototype with a scoped service on the anchor.
+- Replace the ssh-shim prototype with a scoped service on the credential host.
+- Harden the secret store behind `secret get`: encrypted-at-rest (age/sops) as a light step, then Vault / OpenBao when the operational cost is justified.
 - RFC822 draft assembly helper (compose real drafts through `gws gmail users drafts create`).
 - Link resolution across Docs / Sheets / Slides / Drive from mail bodies.
 - MCP interface alongside the CLI.
