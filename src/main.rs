@@ -18,11 +18,18 @@ const GWX_SCOPES: &str = "https://www.googleapis.com/auth/gmail.readonly,\
 https://www.googleapis.com/auth/gmail.compose,\
 https://www.googleapis.com/auth/drive.readonly";
 
-/// gwx's registered Google OAuth 'installed app' client; ONE app shared by all users
-/// so end users never need to run `gws auth setup` or create their own GCP OAuth client.
-const GWX_CLIENT_ID: &str = "REPLACE_WITH_GWX_OAUTH_CLIENT_ID";
-/// installed-app secret is not truly secret
-const GWX_CLIENT_SECRET: &str = "REPLACE_WITH_GWX_OAUTH_CLIENT_SECRET";
+/// gwx's registered Google OAuth 'installed app' client_id — ONE app shared by all users
+/// so end users never run `gws auth setup` or create their own GCP client. A client_id is
+/// public-safe (it travels in every OAuth request), so it lives in source.
+const GWX_CLIENT_ID: &str = "145940090997-52bcdtbkmeahde2juknvrss72hbup6fv.apps.googleusercontent.com";
+/// The client secret is NOT stored in source (keeps a public repo clean). Release builds
+/// inject it at COMPILE time via the `GWX_CLIENT_SECRET` build env; dev builds have none
+/// (empty) and fall back to a runtime / BYO client. An installed-app secret is non-confidential
+/// for the loopback flow, but build-time injection keeps it out of git regardless.
+const GWX_CLIENT_SECRET: &str = match option_env!("GWX_CLIENT_SECRET") {
+    Some(s) => s,
+    None => "",
+};
 
 #[derive(Parser)]
 #[command(name = "gwx", version, about = "Multi-account, policy-governed Google Workspace for AI agents (wraps gws).")]
@@ -451,11 +458,10 @@ fn main() {
         Cmd::Doctor => run_doctor(),
         Cmd::Mail { account, op } => match op {
             MailOp::List { n } => {
-                run_gws(&account, &["gmail", "+triage", "--params", &format!("'{{\"maxResults\":{n}}}'")])
+                let max = n.to_string();
+                run_gws(&account, &["gmail", "+triage", "--max", &max])
             }
-            MailOp::Read { id } => {
-                run_gws(&account, &["gmail", "+read", "--params", &format!("'{{\"id\":\"{id}\"}}'")])
-            }
+            MailOp::Read { id } => run_gws(&account, &["gmail", "+read", "--id", &id]),
             MailOp::Draft { to, subject, body, cc } => {
                 eprintln!("📝 建立草稿於 {account}（不寄）…");
                 let raw = build_raw(&to, &subject, &body, cc.as_deref());
