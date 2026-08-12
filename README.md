@@ -75,6 +75,7 @@ Once installed (or from a `cargo install --path .` dev build):
 
 ```sh
 gwx                          # detects setup and tells you the next step
+gwx setup                    # installs gws (the engine) for your platform — see note below
 gwx auth personal            # opens Google sign-in — approve read + compose + drive.readonly
 gwx mail  --as personal list                         # your unread inbox
 gwx mail  --as personal list --query "travel OR 訂房"  # server-side Gmail search
@@ -83,6 +84,8 @@ gwx doc   --as personal get <fileOrLink>             # the text behind a Doc/She
 ```
 
 `gwx auth <name>` opens a browser and **you** complete the consent (an agent can run the command, but the human clicks "allow" — by design). Repeat per account (`gwx auth work`, …) and switch with `--as`.
+
+**The engine (gws).** gwx wraps [`gws`](https://github.com/googleworkspace/cli) and doesn't bundle it. In **local mode** the first gws-backed command detects a missing engine and offers to install it (`Install it now? [Y/n]`); non-interactive/agent runs print `gwx setup` instead of prompting. `gwx setup` downloads the matching gws release binary, verifies its sha256, and drops it next to gwx — or install it yourself with `brew install googleworkspace-cli` / a [release binary](https://github.com/googleworkspace/cli/releases). In **fleet mode** (`GWX_HOST` set) the engine lives on the anchor, so thin clients need only the gwx binary — never gws.
 
 **Who can sign in today (honest):** gwx's bundled Google app is still going through Google's review, so you'll see an "unverified app" screen (click through it), and the shared app has a 100-user lifetime cap. That's plenty for yourself and a small beta. Need unlimited, or your own project? **Bring your own OAuth client** — set `GOOGLE_WORKSPACE_CLI_CLIENT_ID` / `GOOGLE_WORKSPACE_CLI_CLIENT_SECRET` and `gwx auth` uses it instead (no shared cap, no verification needed). See [`docs/SPEC.md`](docs/SPEC.md).
 

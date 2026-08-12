@@ -82,6 +82,8 @@ enum Cmd {
     },
     /// Diagnose setup: is gws installed, which accounts are configured
     Doctor,
+    /// Install gws (the engine gwx wraps) for this platform
+    Setup,
 }
 
 #[derive(Subcommand)]
@@ -221,10 +223,12 @@ fn run_doctor() -> i32 {
         Ok(p) if p != "__MISSING__" && !p.is_empty() => println!("✅ gws found on {place}: {p}"),
         Ok(_) => {
             println!("❌ gws is not installed on {place}.");
-            println!("   Install it:  npm install -g @googleworkspace/cli   (or a release binary)");
             if remote.is_none() {
+                println!("   Install it:  gwx setup      (fetches the matching gws binary for your platform)");
+                println!("   or manually: brew install googleworkspace-cli  ·  https://github.com/googleworkspace/cli/releases");
                 return 1;
             }
+            println!("   Install gws on the host (see docs/SPEC.md).");
         }
         Err(e) => {
             // Only reachable in remote mode (ssh itself failed).
@@ -471,6 +475,21 @@ dup https://docs.google.com/document/d/1AbC_dEf-GhIjKlMnOp/edit";
         assert!(kinds.contains(&"drive"));
         assert!(r.iter().all(|x| x.1.len() >= 10)); // no bare-word false positives
     }
+
+    #[test]
+    fn gws_target_matches_a_shipped_asset() {
+        // On any platform gwx itself builds for, we must be able to name a gws asset.
+        let t = gws_target().expect("supported build platform should map to a gws target");
+        let known = [
+            "aarch64-apple-darwin",
+            "x86_64-apple-darwin",
+            "aarch64-unknown-linux-gnu",
+            "aarch64-unknown-linux-musl",
+            "x86_64-unknown-linux-gnu",
+            "x86_64-unknown-linux-musl",
+        ];
+        assert!(known.contains(&t.as_str()), "unexpected gws target: {t}");
+    }
 }
 
 /// Rename a configured account (moves its per-account config dir; gws's key isn't path-bound).
@@ -586,6 +605,151 @@ fn run_auth(account: &str, show_url: bool) -> i32 {
     }
 }
 
+/// Is `gws` runnable on the current PATH?
+fn gws_on_path() -> bool {
+    Command::new("gws")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// The gws release-asset triple for this platform, or None if we can't auto-install here.
+/// Mirrors the six targets gws (and gwx) ship via cargo-dist.
+fn gws_target() -> Option<String> {
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x86_64",
+        "aarch64" | "arm64" => "aarch64",
+        _ => return None,
+    };
+    match std::env::consts::OS {
+        "macos" => Some(format!("{arch}-apple-darwin")),
+        "linux" => {
+            // musl (Alpine / static-linked distros) ships its own loader; otherwise glibc.
+            let musl = std::path::Path::new("/lib/ld-musl-x86_64.so.1").exists()
+                || std::path::Path::new("/lib/ld-musl-aarch64.so.1").exists();
+            let libc = if musl { "unknown-linux-musl" } else { "unknown-linux-gnu" };
+            Some(format!("{arch}-{libc}"))
+        }
+        _ => None,
+    }
+}
+
+/// Where to drop the gws binary: next to the running gwx (same dir → same PATH entry).
+fn gws_install_dir() -> std::path::PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            return dir.to_path_buf();
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    std::path::Path::new(&home).join(".cargo/bin")
+}
+
+/// Manual install options (everything *other* than `gwx setup`), printed when
+/// auto-install is declined, fails, or isn't available for the platform.
+fn print_gws_manual() {
+    eprintln!("  • macOS:  brew install googleworkspace-cli");
+    eprintln!("  • any OS: https://github.com/googleworkspace/cli/releases");
+    eprintln!("  • npm:    npm install -g @googleworkspace/cli   (needs Node)");
+}
+
+/// Download + verify (sha256) + install the matching gws release binary next to gwx.
+/// Shells out to curl/tar/shasum so gwx stays engine-thin (no HTTP/crypto crates).
+fn install_gws() -> i32 {
+    if remote_host().is_some() {
+        eprintln!("Remote mode (GWX_HOST is set): gws runs on the anchor — install it there, not here.");
+        return 1;
+    }
+    let target = match gws_target() {
+        Some(t) => t,
+        None => {
+            eprintln!(
+                "gwx: can't auto-install gws for this platform ({} {}).",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            );
+            print_gws_manual();
+            return 1;
+        }
+    };
+    let dir = gws_install_dir();
+    let url = format!(
+        "https://github.com/googleworkspace/cli/releases/latest/download/google-workspace-cli-{target}.tar.gz"
+    );
+    eprintln!("Installing gws ({target}) → {} …", dir.display());
+    let script = format!(
+        r#"set -e
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL {url} -o "$tmp/g.tar.gz"
+curl -fsSL {url}.sha256 -o "$tmp/g.sha256"
+exp=$(awk '{{print $1}}' "$tmp/g.sha256")
+act=$( (sha256sum "$tmp/g.tar.gz" 2>/dev/null || shasum -a 256 "$tmp/g.tar.gz") | awk '{{print $1}}')
+[ -n "$exp" ] && [ "$exp" = "$act" ] || {{ echo "gwx: sha256 verification failed" >&2; exit 3; }}
+tar -xzf "$tmp/g.tar.gz" -C "$tmp"
+bin=$(find "$tmp" -type f -name gws | head -1)
+[ -n "$bin" ] || {{ echo "gwx: no gws binary inside the archive" >&2; exit 4; }}
+mkdir -p {dir}
+install -m 0755 "$bin" {dir}/gws
+"#,
+        url = url,
+        dir = sh_quote(dir.to_string_lossy().as_ref()),
+    );
+    match Command::new("sh").arg("-c").arg(&script).status() {
+        Ok(s) if s.success() => {
+            // Make the freshly-installed gws visible to this same process's child calls.
+            let d = dir.to_string_lossy().to_string();
+            let path = std::env::var("PATH").unwrap_or_default();
+            std::env::set_var("PATH", format!("{d}:{path}"));
+            eprintln!("✅ gws installed → {}/gws", dir.display());
+            0
+        }
+        Ok(s) => {
+            let code = s.code().unwrap_or(1);
+            eprintln!("gwx: gws install failed (exit {code}). Install it yourself:");
+            print_gws_manual();
+            code
+        }
+        Err(e) => {
+            eprintln!("gwx: couldn't run the installer ({e}). Install gws yourself:");
+            print_gws_manual();
+            1
+        }
+    }
+}
+
+/// Local-mode preflight: ensure the gws engine exists, offering to install it if not.
+/// Returns true if gws is (now) available; false means the caller should abort.
+/// Fleet mode is a no-op here — gws lives on the anchor, reached over ssh.
+fn ensure_gws_local() -> bool {
+    if remote_host().is_some() || gws_on_path() {
+        return true;
+    }
+    eprintln!("gwx needs its engine — gws (the Google Workspace CLI) — which isn't installed yet.");
+    // Only auto-install with a human present; an agent/non-TTY gets a copy-paste path instead.
+    let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+    if interactive {
+        eprint!("Install it now? [Y/n] ");
+        use std::io::Write;
+        let _ = std::io::stderr().flush();
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        let ans = line.trim().to_lowercase();
+        if ans.is_empty() || ans == "y" || ans == "yes" {
+            return install_gws() == 0 && gws_on_path();
+        }
+        eprintln!("\nOK — install it yourself, then re-run:");
+        print_gws_manual();
+        false
+    } else {
+        eprintln!("\nRun:  gwx setup      (installs the matching gws for your platform)");
+        eprintln!("or install it yourself:");
+        print_gws_manual();
+        false
+    }
+}
+
 /// Bare `gwx` (no subcommand): detect setup, then either show usage or onboard.
 fn run_welcome() -> i32 {
     let accounts = list_accounts();
@@ -613,6 +777,16 @@ fn main() {
         Some(c) => c,
         None => exit(run_welcome()),
     };
+    // Local mode needs the gws engine on this machine; fleet mode runs gws on the anchor.
+    // Gate the gws-backed commands once here so a missing engine guides/installs instead of
+    // dumping a raw "No such file or directory" from the child process.
+    let needs_engine = matches!(
+        cmd,
+        Cmd::Mail { .. } | Cmd::Drive { .. } | Cmd::Doc { .. } | Cmd::Auth { .. }
+    );
+    if needs_engine && remote_host().is_none() && !ensure_gws_local() {
+        exit(1);
+    }
     let code = match cmd {
         Cmd::Auth { account, show_url } => run_auth(&account, show_url),
         Cmd::Accounts => {
@@ -628,6 +802,7 @@ fn main() {
         }
         Cmd::Rename { old, new } => run_rename(&old, &new),
         Cmd::Doctor => run_doctor(),
+        Cmd::Setup => install_gws(),
         Cmd::Mail { account, op } => match op {
             MailOp::List { n, query } => {
                 let max = n.to_string();
