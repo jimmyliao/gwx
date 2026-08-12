@@ -18,6 +18,12 @@ const GWX_SCOPES: &str = "https://www.googleapis.com/auth/gmail.readonly,\
 https://www.googleapis.com/auth/gmail.compose,\
 https://www.googleapis.com/auth/drive.readonly";
 
+/// gwx's registered Google OAuth 'installed app' client; ONE app shared by all users
+/// so end users never need to run `gws auth setup` or create their own GCP OAuth client.
+const GWX_CLIENT_ID: &str = "REPLACE_WITH_GWX_OAUTH_CLIENT_ID";
+/// installed-app secret is not truly secret
+const GWX_CLIENT_SECRET: &str = "REPLACE_WITH_GWX_OAUTH_CLIENT_SECRET";
+
 #[derive(Parser)]
 #[command(name = "gwx", version, about = "Multi-account, policy-governed Google Workspace for AI agents (wraps gws).")]
 struct Cli {
@@ -368,12 +374,28 @@ fn run_auth(account: &str) -> i32 {
         return 1;
     }
     let cfg = expand_home(&format!("{}/{}", config_base(), account));
+
+    let user_has_own_client = std::env::var("GOOGLE_WORKSPACE_CLI_CLIENT_ID").is_ok();
+    let mut cmd = Command::new("gws");
+    cmd.args(["auth", "login", "--scopes", GWX_SCOPES])
+        .env("GOOGLE_WORKSPACE_CLI_CONFIG_DIR", &cfg);
+
+    if user_has_own_client {
+        // BYO client: let gws inherit GOOGLE_WORKSPACE_CLI_CLIENT_ID (and secret) from env.
+    } else if GWX_CLIENT_ID != "REPLACE_WITH_GWX_OAUTH_CLIENT_ID" {
+        cmd.env("GOOGLE_WORKSPACE_CLI_CLIENT_ID", GWX_CLIENT_ID)
+            .env("GOOGLE_WORKSPACE_CLI_CLIENT_SECRET", GWX_CLIENT_SECRET);
+    } else {
+        eprintln!(
+            "gwx's built-in Google sign-in isn't configured in this build yet.\n\
+             Set GOOGLE_WORKSPACE_CLI_CLIENT_ID to your own OAuth client, or use a build that bundles gwx's client."
+        );
+        return 1;
+    }
+
+    // Only reached when we're actually going to authorize.
     eprintln!("Opening Google sign-in for '{account}' — read + compose only, never send.\n");
-    match Command::new("gws")
-        .args(["auth", "login", "--scopes", GWX_SCOPES])
-        .env("GOOGLE_WORKSPACE_CLI_CONFIG_DIR", &cfg)
-        .status()
-    {
+    match cmd.status() {
         Ok(s) if s.success() => {
             println!("\n✅ '{account}' authorized.  Try:  gwx mail --as {account} list 5");
             0
