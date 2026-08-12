@@ -23,7 +23,7 @@ Run bare `gwx` and it tells you what to do next — sign in if you haven't, or h
 
 - **Local-first, fleet-ready.** On one machine, credentials and everything else stay local — no servers, no config. Point `GWX_HOST` at a host and the same CLI becomes a thin client for a shared credential host (see [Modes](#modes)). You only meet that complexity if you ask for it.
 - **Switch accounts with one flag.** `--as <account>` — no logging in and out, no juggling browser profiles.
-- **Governance built in.** Draft-only by default (the OAuth scope literally can't send). Work identities require you to review a draft before anything happens with it. Autonomous sending is never allowed.
+- **Governance built in.** Draft-only by default — gwx only ever creates drafts and **never calls a send endpoint** (and doesn't request the `gmail.send` scope). Work identities require you to review a draft before anything happens with it. Autonomous sending is never allowed.
 - **Cross-service, not just mail.** Open an email, follow the Google Doc / Sheet / Drive link inside, and read the content behind it — one flow.
 - **Works with any shell agent.** It's a plain CLI, so Claude / Codex / agy / your terminal all use it the same way. (An MCP interface is on the roadmap.)
 
@@ -71,7 +71,7 @@ Windows (`x86_64-pc-windows-msvc`, with an auto-generated `install.ps1`) is a on
 
 ## Safety model
 
-- **Draft-only by default** — accounts are authorized with read + compose scopes, so the token *cannot* send.
+- **Draft-only by default** — gwx authorizes read + compose (never `gmail.send`) and its code only ever calls `drafts.create`, never a send endpoint. (Honest note: the compose scope *can* technically send, so the guarantee is gwx's code, not the scope alone.)
 - **Work identities are review-gated** — creating a draft on a work account surfaces a mandatory "review required" notice; the task isn't done until you've looked.
 - **No autonomous send, ever** — sending requires an explicit human confirmation and a separately-granted scope.
 

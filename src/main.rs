@@ -12,8 +12,9 @@ use std::process::{exit, Command};
 /// Real deployments list their work identities in policy.yaml — see policy.example.yaml.
 const REVIEW_REQUIRED: &[&str] = &["work"];
 
-/// Draft-only OAuth scopes: read Gmail + Drive, create drafts — but NOT gmail.send.
-/// The token physically cannot send; this is the backstop behind the policy layer.
+/// OAuth scopes: read Gmail + Drive + create drafts. We deliberately do NOT request
+/// gmail.send. NOTE: gmail.compose itself can *technically* send, so the real guarantee
+/// is that gwx's code only ever calls drafts.create — never any send endpoint.
 const GWX_SCOPES: &str = "https://www.googleapis.com/auth/gmail.readonly,\
 https://www.googleapis.com/auth/gmail.compose,\
 https://www.googleapis.com/auth/drive.readonly";
@@ -571,7 +572,7 @@ fn main() {
                 code
             }
             MailOp::Send => {
-                eprintln!("🚫 送信被 policy 擋下:gwx 不自主寄信(scope 亦不含 gmail.send)。");
+                eprintln!("🚫 Send is blocked: gwx only creates drafts and never calls a send endpoint (and doesn't request gmail.send).");
                 2
             }
         },

@@ -23,7 +23,7 @@ gwx mail  --as work     draft --to a@b.com --subject "..." --body "..."   # 只�
 
 - **Local-first、可長成 fleet。** 一台電腦上,憑證與一切都留在本地 —— 沒有伺服器、沒有設定。把 `GWX_HOST` 指向一台主機,同一個 CLI 就變成共用憑證主機的**瘦客戶端**(見 [模式](#模式))。你不主動要求,就碰不到那份複雜度。
 - **切帳號只要一個旗標。** `--as <account>` —— 不用登入登出,不用在瀏覽器多重設定檔之間切換。
-- **治理內建。** 預設只能建草稿(OAuth scope 本身就寄不出去)。工作身分在建草稿後,一定要你先過目才算數。自主寄信永遠不允許。
+- **治理內建。** 預設只建草稿 —— gwx **只呼叫 drafts.create、永不呼叫任何 send**(也不請求 `gmail.send` scope)。工作身分建草稿後,一定要你先過目才算數。自主寄信永遠不允許。
 - **跨服務,不只是信。** 開一封信、跟著裡面的 Google Doc / Sheet / Drive 連結,直接讀到連結背後的內容 —— 一氣呵成。
 - **任何 shell agent 都能用。** 它就是個純 CLI,所以 Claude / Codex / agy / 你的終端機用法完全一致。(MCP 介面在 roadmap 上。)
 
@@ -71,7 +71,7 @@ Windows(`x86_64-pc-windows-msvc`,附自動生成的 `install.ps1`)只是 target 
 
 ## 安全模型
 
-- **預設只能建草稿** —— 帳號只授權 read + compose scope,所以 token *寄不出去*。
+- **預設只建草稿** —— gwx 只授權 read + compose(不含 `gmail.send`),且程式層只呼叫 `drafts.create`、永不碰 send。(誠實說明:compose scope 本身**技術上能寄**,所以保證來自 gwx 的程式碼,不是 scope。)
 - **工作身分強制 review** —— 在工作帳號建草稿會跳出強制的「review required」提示;你沒看過就不算完成。
 - **永不自主寄信** —— 要寄信需要人明確確認,外加另外授權的 scope。
 

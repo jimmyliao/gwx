@@ -52,9 +52,9 @@ Explicit addressing (not an ambient "current account") is deliberate: an agent c
 
 ## 5. Policy model (the guardrail)
 
-Policy is per-identity and enforced two ways — by rule *and* by OAuth scope, so a rule bug can't grant a capability the token physically lacks.
+Policy is per-identity. The scope choice narrows the surface, but the send guarantee is at the **code** level, not the scope.
 
-- **Draft-only by default.** Accounts are authorized with `gmail.readonly` + `gmail.compose` + `drive.readonly`. Compose can create a draft; it **cannot send**. Sending would require a separately-granted `gmail.send` scope that the default setup never requests.
+- **Draft-only by default.** Accounts are authorized with `gmail.readonly` + `gmail.compose` + `drive.readonly`. ⚠️ Be honest about scopes: `gmail.compose` can create drafts **and can technically send** — there is no Gmail scope that allows drafting but forbids sending. So the real guarantee is twofold: (1) gwx never requests `gmail.send`, and (2) **gwx's code only ever calls `drafts.create`, never any send endpoint.** Sending is prevented by the code, not by the compose scope alone.
 - **Work identities are review-gated.** Creating a draft on a work account raises a mandatory "🔴 review required" notice. The task is not complete until a human has looked at the draft.
 - **No autonomous send, ever.** Sending is `autonomous_send: never` — it requires an explicit human confirmation, on top of the extra scope.
 
@@ -76,7 +76,7 @@ gwx accounts                          # list configured accounts
 | Scope | Grants | In default setup |
 |---|---|---|
 | `gmail.readonly` | read mail | ✅ |
-| `gmail.compose` | create drafts (not send) | ✅ |
+| `gmail.compose` | create/read drafts (also *can* send — gwx never calls send) | ✅ |
 | `drive.readonly` | read Drive + export Docs | ✅ |
 | `gmail.send` | send mail | ❌ (opt-in, per-confirmation only) |
 

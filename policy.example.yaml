@@ -1,7 +1,7 @@
 # gwx per-account policy — EXAMPLE / TEMPLATE (redacted).
 # Copy to your deployment (kept OUT of git) and fill in real accounts.
 # The governance layer is enforced two ways: by rule here AND by OAuth scope,
-# so a rule bug can't grant a capability the token physically lacks.
+# The scope choice narrows the surface; the send guarantee is at the code level (gwx only calls drafts.create).
 accounts:
   personal:                       # e.g. a personal Gmail
     email: you@example.com
@@ -19,4 +19,4 @@ accounts:
 send_policy:
   autonomous_send: never
   requires: human_confirm
-  note: "draft-only via readonly+compose scope. Sending needs gmail.send + per-action human confirmation."
+  note: "draft-only: gwx only calls drafts.create, never a send endpoint (and never requests gmail.send). Sending would need gmail.send + per-action human confirmation."
