@@ -185,16 +185,32 @@ fn run_gws(account: &str, args: &[&str]) -> i32 {
         acct = account,
         args = args.join(" ")
     );
-    match Command::new("ssh")
+    let out = match Command::new("ssh")
         .args(["-o", "BatchMode=yes", &host(), &remote])
-        .status()
+        .output()
     {
-        Ok(s) => s.code().unwrap_or(1),
+        Ok(o) => o,
         Err(e) => {
-            eprintln!("ssh 失敗: {e}");
-            1
+            eprintln!("ssh failed: {e}");
+            return 1;
         }
+    };
+    // Pass the captured streams through unchanged.
+    use std::io::Write;
+    let _ = std::io::stdout().write_all(&out.stdout);
+    let _ = std::io::stderr().write_all(&out.stderr);
+    // gws can exit 0 while returning a top-level {"error":{...}} envelope (e.g. a 401
+    // authError). Inspect the body, not just the exit code, or auth failures pass as success.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let err_envelope = regex::Regex::new(r#"^\s*\{\s*"error"\s*:"#)
+        .unwrap()
+        .is_match(&stdout);
+    let code = out.status.code().unwrap_or(1);
+    if code == 0 && err_envelope {
+        eprintln!("gwx: gws returned an error envelope with exit 0 — treating as failure.");
+        return 2;
     }
+    code
 }
 
 fn review_required(account: &str) -> bool {
