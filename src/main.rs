@@ -44,6 +44,8 @@ enum Cmd {
     },
     /// 列出已設定帳號
     Accounts,
+    /// 偵測設定:host 可連、gws、已設定帳號(setup 引導)
+    Doctor,
 }
 
 #[derive(Subcommand)]
@@ -93,6 +95,72 @@ fn host() -> String {
 }
 fn creds_dir() -> String {
     std::env::var("GWX_CREDS_DIR").unwrap_or_else(|_| "$HOME/gwx-creds".into())
+}
+
+/// Run a command on the host over ssh, capturing stdout. Err carries stderr / failure.
+fn ssh_capture(remote: &str, connect_timeout: u32) -> Result<String, String> {
+    let out = Command::new("ssh")
+        .args([
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            &format!("ConnectTimeout={connect_timeout}"),
+            &host(),
+            remote,
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// Detect setup state and guide the user — a lightweight wizard.
+fn run_doctor() -> i32 {
+    println!("gwx doctor — 偵測設定\n");
+    let h = std::env::var("GWX_HOST").unwrap_or_default();
+    if h.is_empty() {
+        println!("⚠️  GWX_HOST 未設定 → 用預設 '{}'", host());
+        println!("    設定:export GWX_HOST=<你的 credential host 的 ssh alias>");
+    } else {
+        println!("✅ GWX_HOST = {h}");
+    }
+
+    // host 可連?
+    match ssh_capture("echo ok", 5) {
+        Ok(_) => println!("✅ host 可連(ssh {})", host()),
+        Err(e) => {
+            println!("❌ host 連不上:{e}");
+            println!("    → 檢查 GWX_HOST / ~/.ssh/config / 私有網路(如 Tailscale)是否上線");
+            println!("\n(host 連上前無法偵測 gws 與帳號。)");
+            return 1;
+        }
+    }
+
+    // gws 裝了嗎?
+    match ssh_capture("command -v gws || echo __MISSING__", 10) {
+        Ok(p) if p != "__MISSING__" && !p.is_empty() => println!("✅ gws 已安裝:{p}"),
+        _ => println!("❌ host 上找不到 gws → 在 host 執行 `npm i -g @googleworkspace/cli`(或裝 release binary)"),
+    }
+
+    // 有哪些帳號 creds?
+    let dir = creds_dir();
+    match ssh_capture(&format!("ls -1 {dir}/*.json 2>/dev/null | sed 's#.*/##;s#.json##'"), 10) {
+        Ok(list) if !list.is_empty() => {
+            let accts: Vec<&str> = list.lines().collect();
+            println!("✅ 已設定帳號({}):{}", accts.len(), accts.join(", "));
+            println!("\n就緒 🎉  試試:gwx mail --as {} list 5", accts[0]);
+        }
+        _ => {
+            println!("⚠️  尚無帳號(host 的 {dir}/ 沒有 *.json)");
+            println!("\n下一步:在 host 為每個帳號跑一次 gws OAuth,");
+            println!("    scope 只給 gmail.readonly + gmail.compose + drive.readonly(→ draft-only、寄不出),");
+            println!("    creds 存成 {dir}/<account>.json");
+        }
+    }
+    0
 }
 
 /// Run gws for a given account on the credential host.
@@ -217,6 +285,7 @@ fn main() {
                 .map(|s| s.code().unwrap_or(1))
                 .unwrap_or(1)
         }
+        Cmd::Doctor => run_doctor(),
         Cmd::Mail { account, op } => match op {
             MailOp::List { n } => {
                 run_gws(&account, &["gmail", "+triage", "--params", &format!("'{{\"maxResults\":{n}}}'")])
