@@ -74,14 +74,17 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum MailOp {
-    /// 未讀摘要(gws gmail +triage)
+    /// Inbox summary — unread by default, or a Gmail search query
     List {
         #[arg(default_value_t = 10)]
         n: u32,
+        /// Gmail search query (default: is:unread), e.g. "travel OR 訂房 OR 機票"
+        #[arg(long, short = 'q')]
+        query: Option<String>,
     },
-    /// 讀某封信
+    /// Read a message
     Read { id: String },
-    /// 建草稿(不寄;工作帳號強制 review)
+    /// Create a draft (never sends; work accounts require review)
     Draft {
         #[arg(long)]
         to: String,
@@ -92,7 +95,7 @@ enum MailOp {
         #[arg(long)]
         cc: Option<String>,
     },
-    /// 🚫 送信:policy 硬擋,永不自主
+    /// 🚫 Send — blocked by policy; gwx never sends on its own
     Send,
 }
 
@@ -543,9 +546,14 @@ fn main() {
         }
         Cmd::Doctor => run_doctor(),
         Cmd::Mail { account, op } => match op {
-            MailOp::List { n } => {
+            MailOp::List { n, query } => {
                 let max = n.to_string();
-                run_gws(&account, &["gmail", "+triage", "--max", &max])
+                let mut args: Vec<&str> = vec!["gmail", "+triage", "--max", &max];
+                if let Some(q) = &query {
+                    args.push("--query");
+                    args.push(q);
+                }
+                run_gws(&account, &args)
             }
             MailOp::Read { id } => run_gws(&account, &["gmail", "+read", "--id", &id]),
             MailOp::Draft { to, subject, body, cc } => {
