@@ -1,6 +1,6 @@
 [package]
 name = "gwx"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Multi-account, policy-governed Google Workspace access for AI agents (wraps gws)."
 repository = "https://github.com/jimmyliao/gwx"
