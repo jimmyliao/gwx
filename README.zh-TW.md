@@ -6,20 +6,23 @@
 
 你有一堆 Google 身分 —— 個人 Gmail、公司 Google Workspace、各種副專案。你的 AI agent（Claude、Codex 等）要真的幫得上忙,就得讀你的信和雲端硬碟 —— 但你不會想讓 token 散落在每一台機器上,更*絕對*不想讓某個 agent 默默替你寄信給老闆。
 
-`gwx` 讓每一台機器上的每一個 agent,用同一套乾淨的方式操作你所有的 Google 帳號 —— 憑證集中在一處,危險動作一律留給人。
+`gwx` 讓你的 agent 用同一套乾淨的方式操作你所有的 Google 帳號,危險動作一律留給人。它是 **local-first** —— 一台電腦上就是裝好、登入、開跑 —— 而且**能長成 fleet**,等你機器不只一台時。
 
 ```sh
-gwx mail  --as work     list                 # 工作信箱的未讀摘要
-gwx mail  --as personal read  <id>           # 讀一封信
+gwx auth personal                            # 開 Google 登入(只 read + compose,永不寄信)
+gwx mail  --as personal list                 # 未讀摘要
+gwx mail  --as work     read  <id>           # 讀一封信
 gwx drive --as work     ls "name contains 'Q3'"
 gwx doc   --as work     get   <fileOrLink>   # 拉出 Doc/Sheet/Slide 連結背後的文字
 gwx mail  --as work     draft --to a@b.com --subject "..." --body "..."   # 只建【草稿】—— 永不寄出
 ```
 
+直接打 `gwx`(無參數)它會告訴你下一步 —— 還沒登入就教你登入,登入了就教你怎麼用。
+
 ## 為什麼用 gwx
 
+- **Local-first、可長成 fleet。** 一台電腦上,憑證與一切都留在本地 —— 沒有伺服器、沒有設定。把 `GWX_HOST` 指向一台主機,同一個 CLI 就變成共用憑證主機的**瘦客戶端**(見 [模式](#模式))。你不主動要求,就碰不到那份複雜度。
 - **切帳號只要一個旗標。** `--as <account>` —— 不用登入登出,不用在瀏覽器多重設定檔之間切換。
-- **憑證集中一處。** token 只放在一台你掌控的主機;其他機器透過你自己的私有網路連過去。agent 拿到的是*能力*,永遠拿不到原始 token。
 - **治理內建。** 預設只能建草稿(OAuth scope 本身就寄不出去)。工作身分在建草稿後,一定要你先過目才算數。自主寄信永遠不允許。
 - **跨服務,不只是信。** 開一封信、跟著裡面的 Google Doc / Sheet / Drive 連結,直接讀到連結背後的內容 —— 一氣呵成。
 - **任何 shell agent 都能用。** 它就是個純 CLI,所以 Claude / Codex / agy / 你的終端機用法完全一致。(MCP 介面在 roadmap 上。)
@@ -31,7 +34,18 @@ gwx mail  --as work     draft --to a@b.com --subject "..." --body "..."   # 只�
 1. **多帳號路由**（`--as`）
 2. **政策治理**（review 關卡、禁止寄信、逐身分規則）
 3. **跨服務連結穿透**（信 → doc/sheet/drive 內容）
-4. **伺服器端的 scoped 存取**（token 留在伺服器端;client 很薄）
+4. **Local-first,外加可選的 scoped fleet 模式**（見下）
+
+## 模式
+
+**本地(預設)。** 一切都在你當下這台跑 —— gws 與憑證都在本地,不用架主機、不走網路。單機開發者需要的就這些:
+
+```sh
+gwx auth personal            # 登入一次
+gwx mail --as personal list  # 開跑
+```
+
+**遠端 / fleet(選用)。** 有好幾台機器、想讓每台上的 agent 共用同一組憑證?把 `GWX_HOST` 設成一台你掌控的主機。現在 token 只留在那台,其他每台的 `gwx` 都是**瘦客戶端**,透過你自己的私有網路請它執行能力 —— 自己絕不持有 token。指令一樣、治理一樣,只是你**主動**選了這個拓撲。多數人永遠不會設 `GWX_HOST`。
 
 ## 安裝
 

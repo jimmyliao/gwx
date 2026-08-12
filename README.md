@@ -6,20 +6,23 @@
 
 You have many Google identities — personal Gmail, work Google Workspace, side projects. Your AI agents (Claude, Codex, and friends) need to read your mail and Drive to actually help — but you don't want tokens scattered across machines, and you *definitely* don't want an agent quietly emailing your boss.
 
-`gwx` gives every agent, on every machine, one clean way to work across all your Google accounts — with the credentials kept in one place and the dangerous actions kept behind a human.
+`gwx` gives your agent one clean way to work across all your Google accounts, with the dangerous actions kept behind a human. It's **local-first** — on a single machine it's just install, sign in, go — and it **scales to a fleet** when you have more than one.
 
 ```sh
-gwx mail  --as work     list                 # unread summary for your work inbox
-gwx mail  --as personal read  <id>           # read a message
+gwx auth personal                            # opens Google sign-in (read + compose only, never send)
+gwx mail  --as personal list                 # unread summary
+gwx mail  --as work     read  <id>           # read a message
 gwx drive --as work     ls "name contains 'Q3'"
 gwx doc   --as work     get   <fileOrLink>   # pull the text behind a Doc/Sheet/Slide link
 gwx mail  --as work     draft --to a@b.com --subject "..." --body "..."   # creates a DRAFT — never sends
 ```
 
+Run bare `gwx` and it tells you what to do next — sign in if you haven't, or how to use it if you have.
+
 ## Why gwx
 
+- **Local-first, fleet-ready.** On one machine, credentials and everything else stay local — no servers, no config. Point `GWX_HOST` at a host and the same CLI becomes a thin client for a shared credential host (see [Modes](#modes)). You only meet that complexity if you ask for it.
 - **Switch accounts with one flag.** `--as <account>` — no logging in and out, no juggling browser profiles.
-- **Credentials live in one place.** Tokens sit on a single host you control; every other machine reaches it over your own private network. Agents get the *capability*, never the raw token.
 - **Governance built in.** Draft-only by default (the OAuth scope literally can't send). Work identities require you to review a draft before anything happens with it. Autonomous sending is never allowed.
 - **Cross-service, not just mail.** Open an email, follow the Google Doc / Sheet / Drive link inside, and read the content behind it — one flow.
 - **Works with any shell agent.** It's a plain CLI, so Claude / Codex / agy / your terminal all use it the same way. (An MCP interface is on the roadmap.)
@@ -31,7 +34,18 @@ gwx mail  --as work     draft --to a@b.com --subject "..." --body "..."   # crea
 1. **Multi-account routing** (`--as`)
 2. **Policy governance** (review gates, no-send, per-identity rules)
 3. **Cross-service link resolution** (mail → doc/sheet/drive content)
-4. **Scoped, server-side access** (the token stays server-side; clients are thin)
+4. **Local-first, with an optional scoped fleet mode** (below)
+
+## Modes
+
+**Local (default).** Everything runs on the machine you're on — gws and your credentials live locally, nothing to host, no network. This is all a single-machine developer ever needs:
+
+```sh
+gwx auth personal            # sign in once
+gwx mail --as personal list  # go
+```
+
+**Remote / fleet (opt-in).** Have several machines and want your agents on all of them to share one set of credentials? Set `GWX_HOST` to a host you control. Now the tokens live only on that host, every other machine runs `gwx` as a **thin client** that asks it to perform a capability over your own private network — and never holds a token itself. Same commands, same governance; you just opted into the topology. Most people never set `GWX_HOST`.
 
 ## Install
 
