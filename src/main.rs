@@ -73,6 +73,13 @@ enum Cmd {
     },
     /// List configured accounts
     Accounts,
+    /// Rename a configured account
+    Rename {
+        /// Current account name
+        old: String,
+        /// New account name
+        new: String,
+    },
     /// Diagnose setup: is gws installed, which accounts are configured
     Doctor,
 }
@@ -466,6 +473,67 @@ dup https://docs.google.com/document/d/1AbC_dEf-GhIjKlMnOp/edit";
     }
 }
 
+/// Rename a configured account (moves its per-account config dir; gws's key isn't path-bound).
+fn run_rename(old: &str, new: &str) -> i32 {
+    for n in [old, new] {
+        if n.is_empty() || !n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+            eprintln!("illegal account name: {n:?}");
+            return 1;
+        }
+    }
+    match remote_host() {
+        Some(_) => {
+            let base = config_base();
+            let shell = format!(
+                "d=\"{base}\"; [ -d \"$d/{old}\" ] || {{ echo __NOEXIST__; exit 0; }}; \
+                 [ -e \"$d/{new}\" ] && {{ echo __EXISTS__; exit 0; }}; \
+                 mv \"$d/{old}\" \"$d/{new}\" && echo __OK__"
+            );
+            match probe(&shell, 8) {
+                Ok(o) if o.contains("__OK__") => {
+                    println!("✅ renamed '{old}' → '{new}'");
+                    0
+                }
+                Ok(o) if o.contains("__NOEXIST__") => {
+                    eprintln!("no account named '{old}' (see: gwx accounts)");
+                    1
+                }
+                Ok(o) if o.contains("__EXISTS__") => {
+                    eprintln!("an account named '{new}' already exists");
+                    1
+                }
+                _ => {
+                    eprintln!("rename failed");
+                    1
+                }
+            }
+        }
+        None => {
+            let base = expand_home(&config_base());
+            let from = std::path::Path::new(&base).join(old);
+            let to = std::path::Path::new(&base).join(new);
+            if !from.is_dir() {
+                eprintln!("no account named '{old}' (see: gwx accounts)");
+                return 1;
+            }
+            if to.exists() {
+                eprintln!("an account named '{new}' already exists");
+                return 1;
+            }
+            match std::fs::rename(&from, &to) {
+                Ok(_) => {
+                    println!("✅ renamed '{old}' → '{new}'");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("rename failed: {e}");
+                    1
+                }
+            }
+        }
+    }
+}
+
 /// Run the account OAuth flow. Local mode: opens Google sign-in via gws into a
 /// per-account config dir. Remote mode: point the user at the host.
 fn run_auth(account: &str, show_url: bool) -> i32 {
@@ -558,6 +626,7 @@ fn main() {
             }
             0
         }
+        Cmd::Rename { old, new } => run_rename(&old, &new),
         Cmd::Doctor => run_doctor(),
         Cmd::Mail { account, op } => match op {
             MailOp::List { n, query } => {
