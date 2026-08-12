@@ -52,8 +52,8 @@ gwx mail --as personal list  # go
 > **Status: prototype.** The commands below describe the **target install UX**. gwx is currently a thin CLI dogfooded against a self-hosted backend — see [`docs/SPEC.md`](docs/SPEC.md). The one-liner and packages land with the first tagged release.
 
 ```sh
-# Quick install (target UX — auto-detects your platform)
-curl -fsSL https://raw.githubusercontent.com/jimmyliao/gwx/main/install.sh | sh
+# Quick install (from the latest release; auto-detects your platform)
+curl -fsSL https://github.com/jimmyliao/gwx/releases/latest/download/gwx-installer.sh | sh
 ```
 
 Planned channels, once releases ship:
@@ -68,6 +68,23 @@ Planned channels, once releases ship:
 Release binaries cover `{x86_64,aarch64}-{apple-darwin, unknown-linux-gnu, unknown-linux-musl}` (musl included so Alpine/Docker work) via [cargo-dist](https://github.com/axodotdev/cargo-dist) — the same pipeline `gws` and `uv` use, which also generates the install script and Homebrew formula. The release workflow is in place and verified locally (`dist plan` / `dist build` produce all six targets, the installer, and the formula); the channels above go live on the first tagged release.
 
 Windows (`x86_64-pc-windows-msvc`, with an auto-generated `install.ps1`) is a one-line addition to the target list — deferred until there's a Windows host to test on.
+
+## Getting Started
+
+Once installed (or from a `cargo install --path .` dev build):
+
+```sh
+gwx                          # detects setup and tells you the next step
+gwx auth personal            # opens Google sign-in — approve read + compose + drive.readonly
+gwx mail  --as personal list                         # your unread inbox
+gwx mail  --as personal list --query "travel OR 訂房"  # server-side Gmail search
+gwx drive --as personal ls
+gwx doc   --as personal get <fileOrLink>             # the text behind a Doc/Sheet link
+```
+
+`gwx auth <name>` opens a browser and **you** complete the consent (an agent can run the command, but the human clicks "allow" — by design). Repeat per account (`gwx auth work`, …) and switch with `--as`.
+
+**Who can sign in today (honest):** gwx's bundled Google app is still going through Google's review, so you'll see an "unverified app" screen (click through it), and the shared app has a 100-user lifetime cap. That's plenty for yourself and a small beta. Need unlimited, or your own project? **Bring your own OAuth client** — set `GOOGLE_WORKSPACE_CLI_CLIENT_ID` / `GOOGLE_WORKSPACE_CLI_CLIENT_SECRET` and `gwx auth` uses it instead (no shared cap, no verification needed). See [`docs/SPEC.md`](docs/SPEC.md).
 
 ## Safety model
 

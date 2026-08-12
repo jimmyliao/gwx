@@ -53,7 +53,7 @@ gwx mail --as personal list  # 開跑
 
 ```sh
 # 一行安裝（目標體驗 —— 自動偵測你的平台）
-curl -fsSL https://raw.githubusercontent.com/jimmyliao/gwx/main/install.sh | sh
+curl -fsSL https://github.com/jimmyliao/gwx/releases/latest/download/gwx-installer.sh | sh
 ```
 
 release 上線後規劃的管道:
@@ -68,6 +68,23 @@ release 上線後規劃的管道:
 release binary 涵蓋 `{x86_64,aarch64}-{apple-darwin, unknown-linux-gnu, unknown-linux-musl}`(含 musl,讓 Alpine/Docker 能跑),透過 [cargo-dist](https://github.com/axodotdev/cargo-dist) 產生 —— 與 `gws`、`uv` 同一套 pipeline,連安裝腳本與 Homebrew formula 都一併生成。release workflow 已就位並在本地驗證通過(`dist plan` / `dist build` 產出全部六個 target、installer 與 formula);上述管道會隨第一個 tagged release 生效。
 
 Windows(`x86_64-pc-windows-msvc`,附自動生成的 `install.ps1`)只是 target 清單多加一行 —— 等有 Windows 主機可測時再補。
+
+## 開始使用(Getting Started)
+
+裝好之後(或用 `cargo install --path .` 的 dev build):
+
+```sh
+gwx                          # 偵測設定,告訴你下一步
+gwx auth personal            # 開 Google 登入 —— 授權 read + compose + drive.readonly
+gwx mail  --as personal list                         # 你的未讀信
+gwx mail  --as personal list --query "旅遊 OR 訂房"    # Gmail 伺服器端搜尋
+gwx drive --as personal ls
+gwx doc   --as personal get <fileOrLink>             # 連結背後的文件文字
+```
+
+`gwx auth <name>` 會開瀏覽器,**同意畫面由你點**(agent 可以幫你跑指令,但「允許」一定是人點 —— 刻意設計)。每個帳號各跑一次(`gwx auth work`…),再用 `--as` 切換。
+
+**誠實說明「現在誰能登入」:** gwx 內建的 Google app 還在 Google 審核中,所以你會看到「未驗證應用程式」畫面(點繼續),而且這個共享 app 有 **100 人終身上限**。自用 + 小 beta 綽綽有餘。要無上限、或想用自己的專案?**自帶 OAuth client** —— 設 `GOOGLE_WORKSPACE_CLI_CLIENT_ID` / `GOOGLE_WORKSPACE_CLI_CLIENT_SECRET`,`gwx auth` 就改用你的(不吃共享上限、免驗證)。詳見 [`docs/SPEC.md`](docs/SPEC.md)。
 
 ## 安全模型
 
