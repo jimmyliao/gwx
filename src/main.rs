@@ -137,6 +137,10 @@ fn expand_home(p: &str) -> String {
         _ => p.to_string(),
     }
 }
+/// POSIX single-quote a string for safe interpolation into a remote shell command.
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
 
 /// Run a shell command in the active mode — locally (`sh -c`) or on the remote host
 /// (ssh) — capturing stdout. Err carries stderr / failure. Used by doctor/welcome.
@@ -231,16 +235,17 @@ fn run_doctor() -> i32 {
 /// GWX_HOST is set. Per-account CONFIG_DIR isolates each account's token cache / secret /
 /// encrypted store (else account A can intermittently act as account B).
 fn run_gws(account: &str, args: &[&str]) -> i32 {
-    let joined = args.join(" ");
     let out = match remote_host() {
         // Remote/fleet mode: CREDENTIALS_FILE selects the identity, CONFIG_DIR isolates,
         // KEYRING_BACKEND=file avoids the OS keyring that's absent on a headless host.
+        // Each arg is shell-escaped so JSON / quotes / spaces survive the remote shell.
         Some(h) => {
+            let escaped = args.iter().map(|a| sh_quote(a)).collect::<Vec<_>>().join(" ");
             let remote = format!(
                 "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE={creds}/{acct}.json \
                  GOOGLE_WORKSPACE_CLI_CONFIG_DIR={cfg}/{acct} \
                  GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file \
-                 gws {joined}",
+                 gws {escaped}",
                 creds = creds_dir(),
                 cfg = config_base(),
                 acct = account,
@@ -249,11 +254,11 @@ fn run_gws(account: &str, args: &[&str]) -> i32 {
                 .args(["-o", "BatchMode=yes", &h, &remote])
                 .output()
         }
-        // Local mode (default): run gws on this machine. Per-account CONFIG_DIR; the OS
+        // Local mode (default): exec gws directly — NO shell, so args (JSON, single quotes,
+        // spaces) pass through verbatim and need no escaping. Per-account CONFIG_DIR; the OS
         // keyring is fine on a workstation, so we don't force the file backend.
-        None => Command::new("sh")
-            .arg("-c")
-            .arg(format!("gws {joined}"))
+        None => Command::new("gws")
+            .args(args)
             .env(
                 "GOOGLE_WORKSPACE_CLI_CONFIG_DIR",
                 expand_home(&format!("{}/{}", config_base(), account)),
@@ -283,6 +288,87 @@ fn run_gws(account: &str, args: &[&str]) -> i32 {
         return 2;
     }
     code
+}
+
+/// Export a Google-native file (Doc/Sheet/Slide) to text on STDOUT. `gws export` only writes
+/// to a file inside its own working directory (never stdout), so we run it in a temp dir and
+/// relay the file to stdout, then clean up.
+fn export_doc(account: &str, file_id: &str) -> i32 {
+    if file_id.is_empty()
+        || !file_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        eprintln!("illegal file id");
+        return 1;
+    }
+    let params = format!("{{\"fileId\":\"{file_id}\",\"mimeType\":\"text/plain\"}}");
+    use std::io::Write;
+    match remote_host() {
+        // Remote: export into a fresh temp dir on the host, cat it, remove it.
+        Some(h) => {
+            let remote = format!(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE={creds}/{acct}.json \
+                 GOOGLE_WORKSPACE_CLI_CONFIG_DIR={cfg}/{acct} \
+                 GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file \
+                 sh -c 'd=$(mktemp -d) && cd \"$d\" && gws drive files export --params {p} -o out.txt >/dev/null 2>&1; cat out.txt 2>/dev/null; rm -rf \"$d\"'",
+                creds = creds_dir(),
+                cfg = config_base(),
+                acct = account,
+                p = sh_quote(&params),
+            );
+            match Command::new("ssh")
+                .args(["-o", "BatchMode=yes", &h, &remote])
+                .output()
+            {
+                Ok(o) => {
+                    let _ = std::io::stdout().write_all(&o.stdout);
+                    let _ = std::io::stderr().write_all(&o.stderr);
+                    o.status.code().unwrap_or(1)
+                }
+                Err(e) => {
+                    eprintln!("ssh failed: {e}");
+                    1
+                }
+            }
+        }
+        // Local: run gws inside the OS temp dir (its cwd), then read the output file to stdout.
+        None => {
+            let dir = std::env::temp_dir();
+            let name = format!("gwx-export-{file_id}.txt");
+            let out_path = dir.join(&name);
+            let res = Command::new("gws")
+                .current_dir(&dir)
+                .args(["drive", "files", "export", "--params", &params, "-o", &name])
+                .env(
+                    "GOOGLE_WORKSPACE_CLI_CONFIG_DIR",
+                    expand_home(&format!("{}/{}", config_base(), account)),
+                )
+                .output();
+            let code = match res {
+                Ok(o) if o.status.success() => match std::fs::read(&out_path) {
+                    Ok(bytes) => {
+                        let _ = std::io::stdout().write_all(&bytes);
+                        0
+                    }
+                    Err(_) => {
+                        // export "succeeded" but wrote no file → surface gws's own output
+                        let _ = std::io::stdout().write_all(&o.stdout);
+                        let _ = std::io::stderr().write_all(&o.stderr);
+                        1
+                    }
+                },
+                Ok(o) => {
+                    let _ = std::io::stderr().write_all(&o.stderr);
+                    o.status.code().unwrap_or(1)
+                }
+                Err(e) => {
+                    eprintln!("failed to run gws: {e}");
+                    1
+                }
+            };
+            let _ = std::fs::remove_file(&out_path);
+            code
+        }
+    }
 }
 
 fn review_required(account: &str) -> bool {
@@ -465,7 +551,7 @@ fn main() {
             MailOp::Draft { to, subject, body, cc } => {
                 eprintln!("📝 建立草稿於 {account}（不寄）…");
                 let raw = build_raw(&to, &subject, &body, cc.as_deref());
-                let json = format!("'{{\"message\":{{\"raw\":\"{raw}\"}}}}'");
+                let json = format!("{{\"message\":{{\"raw\":\"{raw}\"}}}}");
                 let code = run_gws(&account, &["gmail", "users", "drafts", "create", "--json", &json]);
                 if code == 0 {
                     if review_required(&account) {
@@ -484,32 +570,26 @@ fn main() {
         Cmd::Drive { account, op } => match op {
             DriveOp::Ls { query } => run_gws(
                 &account,
-                &["drive", "files", "list", "--params", &format!("'{{\"q\":\"{query}\",\"pageSize\":20}}'")],
+                &["drive", "files", "list", "--params", &format!("{{\"q\":\"{query}\",\"pageSize\":20}}")],
             ),
         },
         Cmd::Doc { account, op } => match op {
-            DocOp::Get { file_id } => run_gws(
-                &account,
-                &["drive", "files", "export", "--params", &format!("'{{\"fileId\":\"{file_id}\",\"mimeType\":\"text/plain\"}}'")],
-            ),
+            DocOp::Get { file_id } => export_doc(&account, &file_id),
             DocOp::Resolve => {
                 use std::io::Read;
                 let mut text = String::new();
                 if std::io::stdin().read_to_string(&mut text).is_err() {
-                    eprintln!("讀 stdin 失敗");
+                    eprintln!("failed to read stdin");
                     exit(1);
                 }
                 let links = extract_links(&text);
                 if links.is_empty() {
-                    eprintln!("(未在文字中找到 Google Doc/Sheet/Slide/Drive 連結)");
+                    eprintln!("(no Google Doc/Sheet/Slide/Drive links found in the text)");
                 }
                 let mut last = 0;
                 for (kind, id, url) in links {
                     println!("── [{kind}] {id}  ({url})");
-                    last = run_gws(
-                        &account,
-                        &["drive", "files", "export", "--params", &format!("'{{\"fileId\":\"{id}\",\"mimeType\":\"text/plain\"}}'")],
-                    );
+                    last = export_doc(&account, &id);
                 }
                 last
             }
