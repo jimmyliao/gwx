@@ -16,7 +16,7 @@ const REVIEW_REQUIRED: &[&str] = &["work"];
 #[command(name = "gwx", version, about = "Multi-account, policy-governed Google Workspace for AI agents (wraps gws).")]
 struct Cli {
     #[command(subcommand)]
-    cmd: Cmd,
+    cmd: Option<Cmd>,
 }
 
 #[derive(Subcommand)]
@@ -96,6 +96,11 @@ fn host() -> String {
 fn creds_dir() -> String {
     std::env::var("GWX_CREDS_DIR").unwrap_or_else(|_| "$HOME/gwx-creds".into())
 }
+/// Base dir holding one per-account gws config dir. Per-account isolation of the
+/// token cache / client secret / encrypted store lives here (see run_gws).
+fn config_base() -> String {
+    std::env::var("GWX_CONFIG_DIR").unwrap_or_else(|_| "$HOME/gws-accounts".into())
+}
 
 /// Run a command on the host over ssh, capturing stdout. Err carries stderr / failure.
 fn ssh_capture(remote: &str, connect_timeout: u32) -> Result<String, String> {
@@ -166,11 +171,19 @@ fn run_doctor() -> i32 {
 /// Run gws for a given account on the credential host.
 /// TODO(productize): swap this ssh call for an HTTP call to the scoped service (see docs/SPEC.md).
 fn run_gws(account: &str, args: &[&str]) -> i32 {
+    // Per-account isolation: CREDENTIALS_FILE selects the identity, CONFIG_DIR gives
+    // each account its own token cache / client secret / encrypted store (else the cache
+    // is shared and account A can intermittently act as account B), KEYRING_BACKEND=file
+    // avoids the OS keyring that fails on a headless host.
     let remote = format!(
-        "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE={}/{}.json gws {}",
-        creds_dir(),
-        account,
-        args.join(" ")
+        "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE={creds}/{acct}.json \
+         GOOGLE_WORKSPACE_CLI_CONFIG_DIR={cfg}/{acct} \
+         GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file \
+         gws {args}",
+        creds = creds_dir(),
+        cfg = config_base(),
+        acct = account,
+        args = args.join(" ")
     );
     match Command::new("ssh")
         .args(["-o", "BatchMode=yes", &host(), &remote])
@@ -271,9 +284,47 @@ dup https://docs.google.com/document/d/1AbC_dEf-GhIjKlMnOp/edit";
     }
 }
 
+/// Bare `gwx` (no subcommand): detect setup state, then either show usage or onboard.
+fn run_welcome() -> i32 {
+    let accounts: Vec<String> = match ssh_capture(
+        &format!("ls -1 {}/*.json 2>/dev/null | sed 's#.*/##;s#.json##'", creds_dir()),
+        5,
+    ) {
+        Ok(list) if !list.trim().is_empty() => list.lines().map(|s| s.to_string()).collect(),
+        _ => Vec::new(),
+    };
+
+    if let Some(first) = accounts.first() {
+        println!("gwx — you're set up ✅");
+        println!("Accounts: {}", accounts.join(", "));
+        println!("\nTry:");
+        println!("  gwx mail  --as {first} list 5");
+        println!("  gwx drive --as {first} ls");
+        println!("  gwx doc   --as {first} get <fileId>");
+        println!("\nFull help: gwx --help    ·    Diagnostics: gwx doctor");
+        0
+    } else {
+        println!("gwx — multi-account, policy-governed Google Workspace for AI agents.\n");
+        println!("You're not set up yet. Two steps:\n");
+        println!("  1. Point gwx at your credential host:");
+        println!("       export GWX_HOST=<ssh alias of the host holding your OAuth creds>\n");
+        println!("  2. On that host, authorize each Google account (draft-only scopes):");
+        println!("       GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file \\");
+        println!("       GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/gws-accounts/<account> \\");
+        println!("         gws auth login       # scopes: gmail.readonly, gmail.compose, drive.readonly");
+        println!("       gws auth export > {}/<account>.json", creds_dir());
+        println!("\nThen check it:  gwx doctor       ·       Full help: gwx --help");
+        1
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
-    let code = match cli.cmd {
+    let cmd = match cli.cmd {
+        Some(c) => c,
+        None => exit(run_welcome()),
+    };
+    let code = match cmd {
         Cmd::Accounts => {
             let cmd = format!(
                 "ls {}/*.json 2>/dev/null | sed 's#.*/##;s#.json##'",
