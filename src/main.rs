@@ -12,6 +12,12 @@ use std::process::{exit, Command};
 /// Real deployments list their work identities in policy.yaml — see policy.example.yaml.
 const REVIEW_REQUIRED: &[&str] = &["work"];
 
+/// Draft-only OAuth scopes: read Gmail + Drive, create drafts — but NOT gmail.send.
+/// The token physically cannot send; this is the backstop behind the policy layer.
+const GWX_SCOPES: &str = "https://www.googleapis.com/auth/gmail.readonly,\
+https://www.googleapis.com/auth/gmail.compose,\
+https://www.googleapis.com/auth/drive.readonly";
+
 #[derive(Parser)]
 #[command(name = "gwx", version, about = "Multi-account, policy-governed Google Workspace for AI agents (wraps gws).")]
 struct Cli {
@@ -42,9 +48,14 @@ enum Cmd {
         #[command(subcommand)]
         op: DocOp,
     },
-    /// 列出已設定帳號
+    /// Authorize a Google account (opens sign-in; read + compose, never send)
+    Auth {
+        /// A name you choose for this account, e.g. "personal" or "work"
+        account: String,
+    },
+    /// List configured accounts
     Accounts,
-    /// 偵測設定:host 可連、gws、已設定帳號(setup 引導)
+    /// Diagnose setup: is gws installed, which accounts are configured
     Doctor,
 }
 
@@ -89,32 +100,48 @@ enum DocOp {
     Resolve,
 }
 
-/// The credential host (a secret store). Set GWX_HOST to your ssh alias for it.
-fn host() -> String {
-    std::env::var("GWX_HOST").unwrap_or_else(|_| "gwx-host".into())
+/// Remote/fleet mode: `Some(host)` if GWX_HOST is a non-empty ssh alias.
+/// `None` = local mode — gws and credentials live on this machine (the default,
+/// and all a single-machine user ever needs).
+fn remote_host() -> Option<String> {
+    match std::env::var("GWX_HOST") {
+        Ok(h) if !h.trim().is_empty() => Some(h),
+        _ => None,
+    }
 }
 fn creds_dir() -> String {
     std::env::var("GWX_CREDS_DIR").unwrap_or_else(|_| "$HOME/gwx-creds".into())
 }
-/// Base dir holding one per-account gws config dir. Per-account isolation of the
-/// token cache / client secret / encrypted store lives here (see run_gws).
+/// Base dir holding one per-account gws config dir (per-account isolation of the
+/// token cache / secret / encrypted store lives here — see run_gws).
 fn config_base() -> String {
-    std::env::var("GWX_CONFIG_DIR").unwrap_or_else(|_| "$HOME/gws-accounts".into())
+    std::env::var("GWX_CONFIG_DIR").unwrap_or_else(|_| "$HOME/.gwx/accounts".into())
+}
+/// Expand a leading `$HOME` for local (non-shell) use.
+fn expand_home(p: &str) -> String {
+    match (p.strip_prefix("$HOME"), std::env::var("HOME")) {
+        (Some(rest), Ok(home)) => format!("{home}{rest}"),
+        _ => p.to_string(),
+    }
 }
 
-/// Run a command on the host over ssh, capturing stdout. Err carries stderr / failure.
-fn ssh_capture(remote: &str, connect_timeout: u32) -> Result<String, String> {
-    let out = Command::new("ssh")
-        .args([
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            &format!("ConnectTimeout={connect_timeout}"),
-            &host(),
-            remote,
-        ])
-        .output()
-        .map_err(|e| e.to_string())?;
+/// Run a shell command in the active mode — locally (`sh -c`) or on the remote host
+/// (ssh) — capturing stdout. Err carries stderr / failure. Used by doctor/welcome.
+fn probe(shell_cmd: &str, connect_timeout: u32) -> Result<String, String> {
+    let out = match remote_host() {
+        Some(h) => Command::new("ssh")
+            .args([
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                &format!("ConnectTimeout={connect_timeout}"),
+                &h,
+                shell_cmd,
+            ])
+            .output(),
+        None => Command::new("sh").arg("-c").arg(shell_cmd).output(),
+    }
+    .map_err(|e| e.to_string())?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {
@@ -122,76 +149,108 @@ fn ssh_capture(remote: &str, connect_timeout: u32) -> Result<String, String> {
     }
 }
 
-/// Detect setup state and guide the user — a lightweight wizard.
-fn run_doctor() -> i32 {
-    println!("gwx doctor — 偵測設定\n");
-    let h = std::env::var("GWX_HOST").unwrap_or_default();
-    if h.is_empty() {
-        println!("⚠️  GWX_HOST 未設定 → 用預設 '{}'", host());
-        println!("    設定:export GWX_HOST=<你的 credential host 的 ssh alias>");
-    } else {
-        println!("✅ GWX_HOST = {h}");
+/// List configured accounts (subdirs of the per-account config base), in the active mode.
+fn list_accounts() -> Vec<String> {
+    match probe(
+        &format!("ls -1d {}/*/ 2>/dev/null | sed 's#/*$##;s#.*/##'", config_base()),
+        8,
+    ) {
+        Ok(list) if !list.trim().is_empty() => list.lines().map(|s| s.to_string()).collect(),
+        _ => Vec::new(),
     }
+}
 
-    // host 可連?
-    match ssh_capture("echo ok", 5) {
-        Ok(_) => println!("✅ host 可連(ssh {})", host()),
+/// Print the onboarding steps for the active mode.
+fn print_onboarding() {
+    match remote_host() {
+        None => {
+            println!("Add your first account (opens Google sign-in; read + compose only, never send):");
+            println!("    gwx auth <name>          e.g.  gwx auth personal");
+            println!("\nThen:  gwx mail --as personal list");
+        }
+        Some(_) => {
+            println!("You're in remote mode (GWX_HOST is set). Authorize each account ON the host:");
+            println!("    GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file \\");
+            println!("    GOOGLE_WORKSPACE_CLI_CONFIG_DIR={}/<name> \\", config_base());
+            println!("      gws auth login --scopes {GWX_SCOPES}");
+            println!("\nThen re-check:  gwx doctor");
+        }
+    }
+}
+
+/// Diagnose setup and guide the user. Local by default; mentions the host only in remote mode.
+fn run_doctor() -> i32 {
+    println!("gwx doctor\n");
+    let remote = remote_host();
+    let place = if remote.is_some() { "the host" } else { "this machine" };
+
+    // Is gws available?
+    match probe("command -v gws || echo __MISSING__", 8) {
+        Ok(p) if p != "__MISSING__" && !p.is_empty() => println!("✅ gws found on {place}: {p}"),
+        Ok(_) => {
+            println!("❌ gws is not installed on {place}.");
+            println!("   Install it:  npm install -g @googleworkspace/cli   (or a release binary)");
+            if remote.is_none() {
+                return 1;
+            }
+        }
         Err(e) => {
-            println!("❌ host 連不上:{e}");
-            println!("    → 檢查 GWX_HOST / ~/.ssh/config / 私有網路(如 Tailscale)是否上線");
-            println!("\n(host 連上前無法偵測 gws 與帳號。)");
+            // Only reachable in remote mode (ssh itself failed).
+            println!("❌ can't reach host '{}': {e}", remote.unwrap_or_default());
+            println!("   Check GWX_HOST / ~/.ssh/config / your private network.");
             return 1;
         }
     }
 
-    // gws 裝了嗎?
-    match ssh_capture("command -v gws || echo __MISSING__", 10) {
-        Ok(p) if p != "__MISSING__" && !p.is_empty() => println!("✅ gws 已安裝:{p}"),
-        _ => println!("❌ host 上找不到 gws → 在 host 執行 `npm i -g @googleworkspace/cli`(或裝 release binary)"),
-    }
-
-    // 有哪些帳號 creds?
-    let dir = creds_dir();
-    match ssh_capture(&format!("ls -1 {dir}/*.json 2>/dev/null | sed 's#.*/##;s#.json##'"), 10) {
-        Ok(list) if !list.is_empty() => {
-            let accts: Vec<&str> = list.lines().collect();
-            println!("✅ 已設定帳號({}):{}", accts.len(), accts.join(", "));
-            println!("\n就緒 🎉  試試:gwx mail --as {} list 5", accts[0]);
-        }
-        _ => {
-            println!("⚠️  尚無帳號(host 的 {dir}/ 沒有 *.json)");
-            println!("\n下一步:在 host 為每個帳號跑一次 gws OAuth,");
-            println!("    scope 只給 gmail.readonly + gmail.compose + drive.readonly(→ draft-only、寄不出),");
-            println!("    creds 存成 {dir}/<account>.json");
-        }
+    // Which accounts are set up?
+    let accts = list_accounts();
+    if let Some(first) = accts.first() {
+        println!("✅ Accounts: {}", accts.join(", "));
+        println!("\nReady 🎉  Try:  gwx mail --as {first} list 5");
+    } else {
+        println!("⚠️  No accounts set up yet.\n");
+        print_onboarding();
     }
     0
 }
 
-/// Run gws for a given account on the credential host.
-/// TODO(productize): swap this ssh call for an HTTP call to the scoped service (see docs/SPEC.md).
+/// Run gws for a given account — locally by default, or on the remote host when
+/// GWX_HOST is set. Per-account CONFIG_DIR isolates each account's token cache / secret /
+/// encrypted store (else account A can intermittently act as account B).
 fn run_gws(account: &str, args: &[&str]) -> i32 {
-    // Per-account isolation: CREDENTIALS_FILE selects the identity, CONFIG_DIR gives
-    // each account its own token cache / client secret / encrypted store (else the cache
-    // is shared and account A can intermittently act as account B), KEYRING_BACKEND=file
-    // avoids the OS keyring that fails on a headless host.
-    let remote = format!(
-        "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE={creds}/{acct}.json \
-         GOOGLE_WORKSPACE_CLI_CONFIG_DIR={cfg}/{acct} \
-         GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file \
-         gws {args}",
-        creds = creds_dir(),
-        cfg = config_base(),
-        acct = account,
-        args = args.join(" ")
-    );
-    let out = match Command::new("ssh")
-        .args(["-o", "BatchMode=yes", &host(), &remote])
-        .output()
-    {
+    let joined = args.join(" ");
+    let out = match remote_host() {
+        // Remote/fleet mode: CREDENTIALS_FILE selects the identity, CONFIG_DIR isolates,
+        // KEYRING_BACKEND=file avoids the OS keyring that's absent on a headless host.
+        Some(h) => {
+            let remote = format!(
+                "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE={creds}/{acct}.json \
+                 GOOGLE_WORKSPACE_CLI_CONFIG_DIR={cfg}/{acct} \
+                 GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file \
+                 gws {joined}",
+                creds = creds_dir(),
+                cfg = config_base(),
+                acct = account,
+            );
+            Command::new("ssh")
+                .args(["-o", "BatchMode=yes", &h, &remote])
+                .output()
+        }
+        // Local mode (default): run gws on this machine. Per-account CONFIG_DIR; the OS
+        // keyring is fine on a workstation, so we don't force the file backend.
+        None => Command::new("sh")
+            .arg("-c")
+            .arg(format!("gws {joined}"))
+            .env(
+                "GOOGLE_WORKSPACE_CLI_CONFIG_DIR",
+                expand_home(&format!("{}/{}", config_base(), account)),
+            )
+            .output(),
+    };
+    let out = match out {
         Ok(o) => o,
         Err(e) => {
-            eprintln!("ssh failed: {e}");
+            eprintln!("failed to run gws: {e}");
             return 1;
         }
     };
@@ -300,16 +359,36 @@ dup https://docs.google.com/document/d/1AbC_dEf-GhIjKlMnOp/edit";
     }
 }
 
-/// Bare `gwx` (no subcommand): detect setup state, then either show usage or onboard.
-fn run_welcome() -> i32 {
-    let accounts: Vec<String> = match ssh_capture(
-        &format!("ls -1 {}/*.json 2>/dev/null | sed 's#.*/##;s#.json##'", creds_dir()),
-        5,
-    ) {
-        Ok(list) if !list.trim().is_empty() => list.lines().map(|s| s.to_string()).collect(),
-        _ => Vec::new(),
-    };
+/// Run the account OAuth flow. Local mode: opens Google sign-in via gws into a
+/// per-account config dir. Remote mode: point the user at the host.
+fn run_auth(account: &str) -> i32 {
+    if remote_host().is_some() {
+        eprintln!("Remote mode (GWX_HOST is set): authorize accounts on the host, then run `gwx doctor`.");
+        print_onboarding();
+        return 1;
+    }
+    let cfg = expand_home(&format!("{}/{}", config_base(), account));
+    eprintln!("Opening Google sign-in for '{account}' — read + compose only, never send.\n");
+    match Command::new("gws")
+        .args(["auth", "login", "--scopes", GWX_SCOPES])
+        .env("GOOGLE_WORKSPACE_CLI_CONFIG_DIR", &cfg)
+        .status()
+    {
+        Ok(s) if s.success() => {
+            println!("\n✅ '{account}' authorized.  Try:  gwx mail --as {account} list 5");
+            0
+        }
+        Ok(s) => s.code().unwrap_or(1),
+        Err(e) => {
+            eprintln!("couldn't run gws (is it installed? `gwx doctor`): {e}");
+            1
+        }
+    }
+}
 
+/// Bare `gwx` (no subcommand): detect setup, then either show usage or onboard.
+fn run_welcome() -> i32 {
+    let accounts = list_accounts();
     if let Some(first) = accounts.first() {
         println!("gwx — you're set up ✅");
         println!("Accounts: {}", accounts.join(", "));
@@ -321,15 +400,9 @@ fn run_welcome() -> i32 {
         0
     } else {
         println!("gwx — multi-account, policy-governed Google Workspace for AI agents.\n");
-        println!("You're not set up yet. Two steps:\n");
-        println!("  1. Point gwx at your credential host:");
-        println!("       export GWX_HOST=<ssh alias of the host holding your OAuth creds>\n");
-        println!("  2. On that host, authorize each Google account (draft-only scopes):");
-        println!("       GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND=file \\");
-        println!("       GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/gws-accounts/<account> \\");
-        println!("         gws auth login       # scopes: gmail.readonly, gmail.compose, drive.readonly");
-        println!("       gws auth export > {}/<account>.json", creds_dir());
-        println!("\nThen check it:  gwx doctor       ·       Full help: gwx --help");
+        println!("Not set up yet.\n");
+        print_onboarding();
+        println!("\nDiagnostics: gwx doctor    ·    Full help: gwx --help");
         1
     }
 }
@@ -341,16 +414,17 @@ fn main() {
         None => exit(run_welcome()),
     };
     let code = match cmd {
+        Cmd::Auth { account } => run_auth(&account),
         Cmd::Accounts => {
-            let cmd = format!(
-                "ls {}/*.json 2>/dev/null | sed 's#.*/##;s#.json##'",
-                creds_dir()
-            );
-            Command::new("ssh")
-                .args(["-o", "BatchMode=yes", &host(), &cmd])
-                .status()
-                .map(|s| s.code().unwrap_or(1))
-                .unwrap_or(1)
+            let accts = list_accounts();
+            if accts.is_empty() {
+                println!("No accounts yet. Add one:  gwx auth <name>");
+            } else {
+                for a in &accts {
+                    println!("{a}");
+                }
+            }
+            0
         }
         Cmd::Doctor => run_doctor(),
         Cmd::Mail { account, op } => match op {
