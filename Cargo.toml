@@ -22,6 +22,8 @@ regex = "1"
 cargo-dist-version = "0.32.0"
 # CI backends to support
 ci = "github"
+# Keep our custom GWX_CLIENT_SECRET env line in release.yml from tripping dist's dirty check
+allow-dirty = ["ci"]
 # The installers to generate for each app
 installers = ["shell", "homebrew"]
 # A GitHub repo to push Homebrew formulas to

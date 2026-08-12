@@ -1,1 +1,5 @@
 target/
+
+# stray debug logs (never commit)
+firebase-debug.log
+*.log
