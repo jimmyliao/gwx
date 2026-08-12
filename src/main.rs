@@ -6,6 +6,7 @@
 //! no token and get no shell on the credential host.
 
 use clap::{Parser, Subcommand};
+use std::io::IsTerminal;
 use std::process::{exit, Command};
 
 /// Work identities: a draft on these requires human review (fallback list).
@@ -66,6 +67,9 @@ enum Cmd {
     Auth {
         /// A name you choose for this account, e.g. "personal" or "work"
         account: String,
+        /// Print the sign-in URL to copy instead of opening a browser (headless / agents)
+        #[arg(long)]
+        show_url: bool,
     },
     /// List configured accounts
     Accounts,
@@ -464,7 +468,7 @@ dup https://docs.google.com/document/d/1AbC_dEf-GhIjKlMnOp/edit";
 
 /// Run the account OAuth flow. Local mode: opens Google sign-in via gws into a
 /// per-account config dir. Remote mode: point the user at the host.
-fn run_auth(account: &str) -> i32 {
+fn run_auth(account: &str, show_url: bool) -> i32 {
     if remote_host().is_some() {
         eprintln!("Remote mode (GWX_HOST is set): authorize accounts on the host, then run `gwx doctor`.");
         print_onboarding();
@@ -491,7 +495,16 @@ fn run_auth(account: &str) -> i32 {
     }
 
     // Only reached when we're actually going to authorize.
-    eprintln!("Opening Google sign-in for '{account}' — read + compose only, never send.\n");
+    // Manual/URL mode when asked, or automatically when there's no interactive terminal
+    // (e.g. an agent ran this) — a browser can't open, so gws prints the URL instead.
+    let manual = show_url || !std::io::stdin().is_terminal();
+    if manual {
+        cmd.env("BROWSER", "/usr/bin/false"); // don't try to open a browser; gws prints the URL
+        eprintln!("Sign in to '{account}' (read + compose only, never send).");
+        eprintln!("👉 Copy the URL below into any browser, authorize, and this finishes automatically — leave it running.\n");
+    } else {
+        eprintln!("Opening Google sign-in for '{account}' — read + compose only, never send.\n");
+    }
     match cmd.status() {
         Ok(s) if s.success() => {
             println!("\n✅ '{account}' authorized.  Try:  gwx mail --as {account} list 5");
@@ -533,7 +546,7 @@ fn main() {
         None => exit(run_welcome()),
     };
     let code = match cmd {
-        Cmd::Auth { account } => run_auth(&account),
+        Cmd::Auth { account, show_url } => run_auth(&account, show_url),
         Cmd::Accounts => {
             let accts = list_accounts();
             if accts.is_empty() {
