@@ -55,7 +55,7 @@ enum MailOp {
     },
     /// 讀某封信
     Read { id: String },
-    /// 建草稿(不寄;leap* 強制 review)
+    /// 建草稿(不寄;工作帳號強制 review)
     Draft {
         #[arg(long)]
         to: String,

@@ -55,7 +55,7 @@ Explicit addressing (not an ambient "current account") is deliberate: an agent c
 Policy is per-identity and enforced two ways — by rule *and* by OAuth scope, so a rule bug can't grant a capability the token physically lacks.
 
 - **Draft-only by default.** Accounts are authorized with `gmail.readonly` + `gmail.compose` + `drive.readonly`. Compose can create a draft; it **cannot send**. Sending would require a separately-granted `gmail.send` scope that the default setup never requests.
-- **Work identities are review-gated.** Creating a draft on a work account (e.g. a `leap*` identity) raises a mandatory "🔴 review required" notice. The task is not complete until a human has looked at the draft.
+- **Work identities are review-gated.** Creating a draft on a work account raises a mandatory "🔴 review required" notice. The task is not complete until a human has looked at the draft.
 - **No autonomous send, ever.** Sending is `autonomous_send: never` — it requires an explicit human confirmation, on top of the extra scope.
 
 See [`policy.example.yaml`](../policy.example.yaml) for the schema — a redacted template. Real account emails live only in your private deployment (copy the example, fill it in, and keep it out of git).
