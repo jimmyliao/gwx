@@ -112,6 +112,10 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}-dist-manifest.json
+      # gwx: bundle the OAuth client secret into release binaries at compile time (option_env!
+      # in src/main.rs). Kept out of source; supplied as a repo secret. ⚠️ If you re-run
+      # `dist generate`, re-add this line (cargo-dist regenerates this file). See docs/RELEASE.md.
+      GWX_CLIENT_SECRET: ${{ secrets.GWX_CLIENT_SECRET }}
     steps:
       - name: enable windows longpaths
         run: |
